@@ -16,15 +16,18 @@ private final class BoundsAwareScrollView: UIScrollView {
 
 struct ZoomableImageView: UIViewRepresentable {
     let image: UIImage
+    var isActive: Bool = true
     var onTap: () -> Void
     var onDismissChanged: (CGSize) -> Void = { _ in }
     var onDismissEnded: (Bool) -> Void = { _ in }
+    var onZoomChanged: (Bool) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             onTap: onTap,
             onDismissChanged: onDismissChanged,
-            onDismissEnded: onDismissEnded
+            onDismissEnded: onDismissEnded,
+            onZoomChanged: onZoomChanged
         )
     }
 
@@ -38,6 +41,9 @@ struct ZoomableImageView: UIViewRepresentable {
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.bouncesZoom = true
         scrollView.isScrollEnabled = false
+        scrollView.contentInsetAdjustmentBehavior = .never
+        scrollView.alwaysBounceVertical = false
+        scrollView.alwaysBounceHorizontal = false
 
         let imageView = UIImageView(image: image)
         imageView.contentMode = .scaleAspectFit
@@ -88,11 +94,16 @@ struct ZoomableImageView: UIViewRepresentable {
         context.coordinator.onTap = onTap
         context.coordinator.onDismissChanged = onDismissChanged
         context.coordinator.onDismissEnded = onDismissEnded
+        context.coordinator.onZoomChanged = onZoomChanged
 
-        guard imageView.image !== image else { return }
+        if imageView.image !== image {
+            imageView.image = image
+            context.coordinator.layoutImage(in: scrollView, imageView: imageView)
+        }
 
-        imageView.image = image
-        context.coordinator.layoutImage(in: scrollView, imageView: imageView)
+        if !isActive {
+            context.coordinator.resetZoom(in: scrollView, imageView: imageView)
+        }
     }
 
     final class Coordinator: NSObject, UIScrollViewDelegate, UIGestureRecognizerDelegate {
@@ -101,19 +112,23 @@ struct ZoomableImageView: UIViewRepresentable {
         var onTap: () -> Void
         var onDismissChanged: (CGSize) -> Void
         var onDismissEnded: (Bool) -> Void
+        var onZoomChanged: (Bool) -> Void
         weak var scrollView: UIScrollView?
         weak var dismissPan: UIPanGestureRecognizer?
         private var isLayouting = false
         private var lastLayoutSignature: String?
+        private var lastReportedZoomed = false
 
         init(
             onTap: @escaping () -> Void,
             onDismissChanged: @escaping (CGSize) -> Void,
-            onDismissEnded: @escaping (Bool) -> Void
+            onDismissEnded: @escaping (Bool) -> Void,
+            onZoomChanged: @escaping (Bool) -> Void
         ) {
             self.onTap = onTap
             self.onDismissChanged = onDismissChanged
             self.onDismissEnded = onDismissEnded
+            self.onZoomChanged = onZoomChanged
         }
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -157,9 +172,24 @@ struct ZoomableImageView: UIViewRepresentable {
         }
 
         func scrollViewDidZoom(_ scrollView: UIScrollView) {
-            scrollView.isScrollEnabled = scrollView.zoomScale > scrollView.minimumZoomScale + 0.001
+            reportZoomIfNeeded(scrollView)
             guard let imageView = scrollView.viewWithTag(Self.imageViewTag) as? UIImageView else { return }
             centerImage(in: scrollView, imageView: imageView)
+        }
+
+        func resetZoom(in scrollView: UIScrollView, imageView: UIImageView) {
+            guard scrollView.zoomScale != scrollView.minimumZoomScale else { return }
+            scrollView.zoomScale = scrollView.minimumZoomScale
+            layoutImage(in: scrollView, imageView: imageView)
+            reportZoomIfNeeded(scrollView)
+        }
+
+        private func reportZoomIfNeeded(_ scrollView: UIScrollView) {
+            let zoomed = scrollView.zoomScale > scrollView.minimumZoomScale + 0.001
+            scrollView.isScrollEnabled = zoomed
+            guard zoomed != lastReportedZoomed else { return }
+            lastReportedZoomed = zoomed
+            onZoomChanged(zoomed)
         }
 
         @objc func handleSingleTap() {

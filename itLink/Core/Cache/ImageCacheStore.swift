@@ -15,17 +15,24 @@ actor ImageCacheStore {
     static let shared = ImageCacheStore()
 
     private let diskCache: DiskCache
-    private let memoryCache = NSCache<NSString, UIImage>()
+    private let thumbnailMemoryCache = NSCache<NSString, UIImage>()
+    private let originalMemoryCache = NSCache<NSString, UIImage>()
 
     init(diskCache: DiskCache = .shared) {
         self.diskCache = diskCache
-        memoryCache.countLimit = 200
-        memoryCache.totalCostLimit = 64 * 1024 * 1024
+        thumbnailMemoryCache.countLimit = 200
+        thumbnailMemoryCache.totalCostLimit = 32 * 1024 * 1024
+        originalMemoryCache.countLimit = 12
+        originalMemoryCache.totalCostLimit = 64 * 1024 * 1024
+    }
+
+    nonisolated static func cacheKey(for url: URL) -> String {
+        let digest = SHA256.hash(data: Data(url.absoluteString.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 
     func cacheKey(for url: URL) -> String {
-        let digest = SHA256.hash(data: Data(url.absoluteString.utf8))
-        return digest.map { String(format: "%02x", $0) }.joined()
+        Self.cacheKey(for: url)
     }
 
     func originalData(for url: URL) -> Data? {
@@ -39,7 +46,7 @@ actor ImageCacheStore {
     func originalImage(for url: URL) -> UIImage? {
         let key = cacheKey(for: url)
         let memoryKey = memoryKey(kind: .original, key: key)
-        return memoryCache.object(forKey: memoryKey)
+        return originalMemoryCache.object(forKey: memoryKey)
     }
 
     func storeOriginalData(_ data: Data, for url: URL) throws {
@@ -71,25 +78,43 @@ actor ImageCacheStore {
         let key = cacheKey(for: url)
         let memoryKey = memoryKey(kind: kind, key: key)
 
-        if let cached = memoryCache.object(forKey: memoryKey) {
+        if let cached = cache(for: kind).object(forKey: memoryKey) {
             return cached
         }
 
         guard let data = diskCache.read(fileName: key, subdirectory: kind.rawValue),
-              let image = UIImage(data: data) else {
+              let image = decodedImage(from: data, kind: kind) else {
             return nil
         }
 
-        remember(image, memoryKey: memoryKey)
+        remember(image, memoryKey: memoryKey, kind: kind)
         return image
     }
 
-    private func remember(_ image: UIImage, for url: URL, kind: ImageCacheKind) {
-        remember(image, memoryKey: memoryKey(kind: kind, key: cacheKey(for: url)))
+    private func decodedImage(from data: Data, kind: ImageCacheKind) -> UIImage? {
+        switch kind {
+        case .thumbnail:
+            return ImageIODecoder.thumbnail(from: data)
+        case .original:
+            return ImageIODecoder.displayImage(from: data)
+        }
     }
 
-    private func remember(_ image: UIImage, memoryKey: NSString) {
-        memoryCache.setObject(image, forKey: memoryKey, cost: pixelCost(of: image))
+    private func remember(_ image: UIImage, for url: URL, kind: ImageCacheKind) {
+        remember(image, memoryKey: memoryKey(kind: kind, key: cacheKey(for: url)), kind: kind)
+    }
+
+    private func remember(_ image: UIImage, memoryKey: NSString, kind: ImageCacheKind) {
+        cache(for: kind).setObject(image, forKey: memoryKey, cost: pixelCost(of: image))
+    }
+
+    private func cache(for kind: ImageCacheKind) -> NSCache<NSString, UIImage> {
+        switch kind {
+        case .thumbnail:
+            return thumbnailMemoryCache
+        case .original:
+            return originalMemoryCache
+        }
     }
 
     private func memoryKey(kind: ImageCacheKind, key: String) -> NSString {

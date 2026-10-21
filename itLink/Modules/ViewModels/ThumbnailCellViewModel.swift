@@ -21,6 +21,7 @@ final class ThumbnailCellViewModel {
     private let imageLoader: any ImageLoadingProviding
     private let loadTimeoutNanoseconds: UInt64?
     private var loadTask: Task<Void, Never>?
+    private var loadID = UUID()
 
     init(
         item: ImageGridItem,
@@ -42,6 +43,7 @@ final class ThumbnailCellViewModel {
     func cancelLoading() {
         loadTask?.cancel()
         loadTask = nil
+        loadID = UUID()
         if state == .loading {
             state = .idle
         }
@@ -60,6 +62,8 @@ final class ThumbnailCellViewModel {
 
     private func startLoading() {
         loadTask?.cancel()
+        let id = UUID()
+        loadID = id
         state = .loading
         image = nil
 
@@ -68,17 +72,11 @@ final class ThumbnailCellViewModel {
         loadTask = Task {
             do {
                 let thumbnail = try await thumbnailWithTimeout(from: url)
-                guard !Task.isCancelled else {
-                    state = .idle
-                    return
-                }
+                guard loadID == id else { return }
                 image = thumbnail
                 state = .loaded
             } catch {
-                guard !Task.isCancelled else {
-                    state = .idle
-                    return
-                }
+                guard loadID == id else { return }
                 state = .failed
             }
         }

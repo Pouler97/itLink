@@ -5,15 +5,18 @@ struct GalleryPageContent: View, Equatable {
     let item: ImageGridItem
     let state: GalleryImageState
     let image: UIImage?
+    var isActive: Bool = true
     let onToggleChrome: () -> Void
     let onRetry: () -> Void
     var onDismissChanged: (CGSize) -> Void = { _ in }
     var onDismissEnded: (Bool) -> Void = { _ in }
+    var onZoomChanged: (Bool) -> Void = { _ in }
 
     static func == (lhs: GalleryPageContent, rhs: GalleryPageContent) -> Bool {
         lhs.item.id == rhs.item.id
             && lhs.state == rhs.state
             && lhs.image === rhs.image
+            && lhs.isActive == rhs.isActive
     }
 
     var body: some View {
@@ -42,9 +45,11 @@ struct GalleryPageContent: View, Equatable {
             if let image {
                 ZoomableImageView(
                     image: image,
+                    isActive: isActive,
                     onTap: onToggleChrome,
                     onDismissChanged: onDismissChanged,
-                    onDismissEnded: onDismissEnded
+                    onDismissEnded: onDismissEnded,
+                    onZoomChanged: onZoomChanged
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {

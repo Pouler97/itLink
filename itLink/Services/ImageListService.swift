@@ -20,7 +20,7 @@ actor ImageListService {
             throw ImageListServiceError.emptyContent
         }
 
-        try diskCache.write(data, fileName: listFileName, subdirectory: listSubdirectory)
+        try? diskCache.write(data, fileName: listFileName, subdirectory: listSubdirectory)
         return ImageListParser.parse(content: content)
     }
 

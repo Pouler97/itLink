@@ -11,6 +11,8 @@ enum GalleryImageState: Equatable {
 @MainActor
 @Observable
 final class ImageGalleryViewModel {
+    static let retainedOriginalRadius = 2
+
     private let sourceItems: [ImageGridItem]
     private(set) var pageItems: [ImageGridItem]
     private(set) var thumbnails: [String: UIImage] = [:]
@@ -22,6 +24,7 @@ final class ImageGalleryViewModel {
 
     private let imageLoader: any ImageLoadingProviding
     private var loadTasks: [String: Task<Void, Never>] = [:]
+    private var loadGeneration: [String: UUID] = [:]
     private var pagingLoadTask: Task<Void, Never>?
     private var pageResolveTask: Task<Void, Never>?
 
@@ -45,6 +48,7 @@ final class ImageGalleryViewModel {
         pagingLoadTask = nil
         loadTasks.values.forEach { $0.cancel() }
         loadTasks.removeAll()
+        loadGeneration.removeAll()
         clearLoadingStatesWithoutImages()
     }
 
@@ -81,15 +85,13 @@ final class ImageGalleryViewModel {
             }
             try? await Task.sleep(for: .milliseconds(80))
             guard !Task.isCancelled else { return }
-            loadImage(at: currentIndex)
-            preloadNeighbors(around: currentIndex)
+            loadVisibleOriginals(around: currentIndex)
         }
     }
 
     func onAppear() {
         resolveValidPages()
-        loadImage(at: currentIndex)
-        preloadNeighbors(around: currentIndex)
+        loadVisibleOriginals(around: currentIndex)
     }
 
     func index(of itemID: String) -> Int? {
@@ -132,8 +134,7 @@ final class ImageGalleryViewModel {
                 currentIndex = min(currentIndex, max(validItems.count - 1, 0))
             }
 
-            loadImage(at: currentIndex)
-            preloadNeighbors(around: currentIndex)
+            loadVisibleOriginals(around: currentIndex)
         }
     }
 
@@ -145,9 +146,34 @@ final class ImageGalleryViewModel {
         isChromeVisible.toggle()
     }
 
+    private func loadVisibleOriginals(around index: Int) {
+        loadImage(at: index)
+        preloadNeighbors(around: index)
+        pruneOriginals(around: index)
+    }
+
     private func preloadNeighbors(around index: Int) {
         for offset in [-1, 1] {
             loadImage(at: index + offset)
+        }
+    }
+
+    private func pruneOriginals(around index: Int) {
+        let keepIDs = Set(
+            pageItems.enumerated()
+                .compactMap { offset, item in
+                    abs(offset - index) <= Self.retainedOriginalRadius ? item.id : nil
+                }
+        )
+
+        for id in images.keys where !keepIDs.contains(id) {
+            images.removeValue(forKey: id)
+            loadTasks[id]?.cancel()
+            loadTasks.removeValue(forKey: id)
+            loadGeneration.removeValue(forKey: id)
+            if states[id] == .loaded {
+                states.removeValue(forKey: id)
+            }
         }
     }
 
@@ -167,24 +193,25 @@ final class ImageGalleryViewModel {
         if !force, loadTasks[item.id] != nil { return }
 
         loadTasks[item.id]?.cancel()
+        let generation = UUID()
+        loadGeneration[item.id] = generation
         states[item.id] = .loading
 
         loadTasks[item.id] = Task {
-            defer { loadTasks.removeValue(forKey: item.id) }
+            defer {
+                if loadGeneration[item.id] == generation {
+                    loadTasks.removeValue(forKey: item.id)
+                }
+            }
 
             do {
                 let image = try await imageLoader.originalImage(for: url)
-                guard !Task.isCancelled else {
-                    clearLoadingState(for: item.id)
-                    return
-                }
+                guard loadGeneration[item.id] == generation else { return }
                 images[item.id] = image
                 states[item.id] = .loaded
+                pruneOriginals(around: currentIndex)
             } catch {
-                guard !Task.isCancelled else {
-                    clearLoadingState(for: item.id)
-                    return
-                }
+                guard loadGeneration[item.id] == generation else { return }
                 states[item.id] = .failed
             }
         }
@@ -194,10 +221,5 @@ final class ImageGalleryViewModel {
         for (id, state) in states where state == .loading && images[id] == nil {
             states.removeValue(forKey: id)
         }
-    }
-
-    private func clearLoadingState(for id: String) {
-        guard images[id] == nil else { return }
-        states.removeValue(forKey: id)
     }
 }

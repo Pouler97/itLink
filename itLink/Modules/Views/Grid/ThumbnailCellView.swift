@@ -4,15 +4,18 @@ struct ThumbnailCellView: View {
     @State private var viewModel: ThumbnailCellViewModel
     @State private var cellFrame: CGRect = .zero
     let isHiddenForHero: Bool
+    let reportsGlobalFrame: Bool
     let onOpen: (UIImage?, CGRect) -> Void
 
     init(
         item: ImageGridItem,
         isHiddenForHero: Bool = false,
+        reportsGlobalFrame: Bool = false,
         onOpen: @escaping (UIImage?, CGRect) -> Void
     ) {
         _viewModel = State(initialValue: ThumbnailCellViewModel(item: item))
         self.isHiddenForHero = isHiddenForHero
+        self.reportsGlobalFrame = reportsGlobalFrame
         self.onOpen = onOpen
     }
 
@@ -32,16 +35,15 @@ struct ThumbnailCellView: View {
 
     private var cellFrameReporter: some View {
         GeometryReader { geometry in
+            let frame = geometry.frame(in: .global)
             Color.clear
-                .preference(
-                    key: GalleryCellFrameKey.self,
-                    value: [viewModel.item.id: geometry.frame(in: .global)]
-                )
-                .onAppear {
-                    cellFrame = geometry.frame(in: .global)
+                .onAppear { cellFrame = frame }
+                .onChange(of: geometry.frame(in: .global)) { _, newFrame in
+                    cellFrame = newFrame
                 }
-                .onChange(of: geometry.frame(in: .global)) { _, frame in
-                    cellFrame = frame
+                .transformPreference(GalleryCellFrameKey.self) { value in
+                    guard reportsGlobalFrame else { return }
+                    value[viewModel.item.id] = frame
                 }
         }
     }

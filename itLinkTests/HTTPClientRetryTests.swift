@@ -23,6 +23,12 @@ final class HTTPClientRetryTests: XCTestCase {
         XCTAssertFalse(HTTPClient.isRetryable(URLError(.timedOut)))
     }
 
+    func testIsRetryableReturnsFalseForOfflineAndDNSErrors() {
+        XCTAssertFalse(HTTPClient.isRetryable(URLError(.notConnectedToInternet)))
+        XCTAssertFalse(HTTPClient.isRetryable(URLError(.cannotFindHost)))
+        XCTAssertFalse(HTTPClient.isRetryable(URLError(.dnsLookupFailed)))
+    }
+
     func testDoesNotRetryClientErrors() async {
         var requestCount = 0
         MockURLProtocol.requestHandler = { _ in

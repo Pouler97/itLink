@@ -20,6 +20,23 @@ final class ImageGalleryViewModelTests: XCTestCase {
         XCTAssertNotNil(viewModel.image(for: items[0]))
     }
 
+    func testRetryDoesNotLetCancelledTaskClearTheNewLoad() async {
+        let loader = MockImageLoader()
+        loader.originalDelayNanoseconds = 80_000_000
+        loader.originalResult = .success(TestImageFactory.solidColor())
+
+        let item = makeImageItem(id: "1")
+        let viewModel = ImageGalleryViewModel(items: [item], startIndex: 0, imageLoader: loader)
+
+        viewModel.onAppear()
+        loader.originalDelayNanoseconds = 1_000_000_000
+        viewModel.retry(item: item)
+        XCTAssertEqual(viewModel.state(for: item), .loading)
+
+        try? await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(viewModel.state(for: item), .loading)
+    }
+
     func testSelectIndexLoadsCurrentAndNeighborImages() async {
         let loader = MockImageLoader()
         loader.originalResult = .success(TestImageFactory.solidColor())
@@ -78,6 +95,25 @@ final class ImageGalleryViewModelTests: XCTestCase {
         await waitUntil(viewModel.state(for: item) == .loaded)
 
         XCTAssertNotNil(viewModel.image(for: item))
+    }
+
+    func testGalleryDropsOriginalsOutsideRetentionWindow() async {
+        let loader = MockImageLoader()
+        loader.originalResult = .success(TestImageFactory.solidColor())
+
+        let items = (1...7).map { makeImageItem(id: "\($0)") }
+        let viewModel = ImageGalleryViewModel(items: items, startIndex: 0, imageLoader: loader)
+
+        viewModel.onAppear()
+        await waitUntil(viewModel.pageItems.count == 7)
+        await waitUntil(viewModel.image(for: items[0]) != nil)
+
+        viewModel.selectIndex(6)
+        await waitUntil(viewModel.image(for: items[6]) != nil)
+        await waitUntil(viewModel.image(for: items[0]) == nil)
+
+        XCTAssertNil(viewModel.image(for: items[0]))
+        XCTAssertNotNil(viewModel.image(for: items[6]))
     }
 
     private func makeImageItem(id: String) -> ImageGridItem {

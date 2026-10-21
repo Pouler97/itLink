@@ -18,8 +18,9 @@ actor HTTPClient {
     nonisolated static func makeDefaultSession() -> URLSession {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 15
-        configuration.timeoutIntervalForResource = 20
+        configuration.timeoutIntervalForResource = 60
         configuration.waitsForConnectivity = false
+        configuration.urlCache = nil
         return URLSession(configuration: configuration)
     }
 
@@ -71,7 +72,13 @@ actor HTTPClient {
 
         if let urlError = error as? URLError {
             switch urlError.code {
-            case .cancelled, .timedOut:
+            case .cancelled,
+                 .timedOut,
+                 .notConnectedToInternet,
+                 .cannotFindHost,
+                 .dnsLookupFailed,
+                 .dataNotAllowed,
+                 .internationalRoamingOff:
                 return false
             default:
                 return true

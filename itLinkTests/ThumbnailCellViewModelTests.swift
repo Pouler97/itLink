@@ -20,6 +20,25 @@ final class ThumbnailCellViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.state, .loading)
     }
 
+    func testCancelledTaskDoesNotResetANewerLoad() async {
+        let loader = MockImageLoader()
+        loader.thumbnailDelayNanoseconds = 80_000_000
+        loader.thumbnailResult = .success(TestImageFactory.solidColor())
+
+        let item = makeImageItem()
+        let viewModel = ThumbnailCellViewModel(item: item, imageLoader: loader)
+
+        viewModel.loadIfNeeded()
+        viewModel.cancelLoading()
+        loader.thumbnailDelayNanoseconds = 1_000_000_000
+        viewModel.loadIfNeeded()
+        XCTAssertEqual(viewModel.state, .loading)
+
+        try? await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(viewModel.state, .loading)
+        XCTAssertNil(viewModel.image)
+    }
+
     func testSuccessfulLoadUpdatesStateAndImage() async {
         let loader = MockImageLoader()
         loader.thumbnailResult = .success(TestImageFactory.solidColor())

@@ -36,7 +36,11 @@ struct GridView: View {
                 .navigationTitle("Изображения")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbarBackground(.visible, for: .navigationBar)
-                .onPreferenceChange(GalleryCellFrameKey.self) { cellFrames = $0 }
+                .accessibilityHidden(galleryStartIndex != nil)
+                .onPreferenceChange(GalleryCellFrameKey.self) { frames in
+                    guard !frames.isEmpty else { return }
+                    cellFrames = frames
+                }
         }
         .overlay {
             if let startIndex = galleryStartIndex {
@@ -49,6 +53,7 @@ struct GridView: View {
                     onHeroItemChange: { heroHiddenID = $0 },
                     onClose: closeGallery
                 )
+                .accessibilityAddTraits(.isModal)
             }
         }
         .onAppear {
@@ -85,7 +90,8 @@ struct GridView: View {
                     ForEach(viewModel.displayedItems) { item in
                         ThumbnailCellView(
                             item: item,
-                            isHiddenForHero: heroHiddenID == item.id
+                            isHiddenForHero: heroHiddenID == item.id,
+                            reportsGlobalFrame: galleryStartIndex != nil
                         ) { preview, frame in
                             openGallery(for: item, preview: preview, frame: frame)
                         }

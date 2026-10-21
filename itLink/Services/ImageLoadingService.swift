@@ -14,6 +14,7 @@ actor ImageLoadingService {
     private var inFlightData: [String: Task<Data, Error>] = [:]
     private var inFlightOriginals: [String: Task<UIImage, Error>] = [:]
     private var inFlightThumbnails: [String: Task<UIImage, Error>] = [:]
+    private let permitLock = NSLock()
     private var activeDownloads = 0
     private var downloadWaiters: [CheckedContinuation<Void, Never>] = []
 
@@ -56,7 +57,7 @@ actor ImageLoadingService {
             guard let thumbnail = ImageIODecoder.thumbnail(from: data) else {
                 throw ImageLoadingError.invalidImageData
             }
-            try await self.cacheStore.storeThumbnail(thumbnail, for: url)
+            try? await self.cacheStore.storeThumbnail(thumbnail, for: url)
             return thumbnail
         }
 
@@ -106,7 +107,7 @@ actor ImageLoadingService {
             guard ImageIODecoder.isDecodableImage(data) else {
                 throw ImageLoadingError.invalidImageData
             }
-            try await self.cacheStore.storeOriginalData(data, for: url)
+            try? await self.cacheStore.storeOriginalData(data, for: url)
             return data
         }
 
@@ -124,21 +125,28 @@ actor ImageLoadingService {
     }
 
     private func acquireDownloadPermit() async {
-        if activeDownloads < maxConcurrentDownloads {
-            activeDownloads += 1
-            return
-        }
-
         await withCheckedContinuation { continuation in
-            downloadWaiters.append(continuation)
+            permitLock.lock()
+            if activeDownloads < maxConcurrentDownloads {
+                activeDownloads += 1
+                permitLock.unlock()
+                continuation.resume()
+            } else {
+                downloadWaiters.append(continuation)
+                permitLock.unlock()
+            }
         }
     }
 
     private func releaseDownloadPermit() {
+        permitLock.lock()
         if downloadWaiters.isEmpty {
             activeDownloads = max(0, activeDownloads - 1)
-        } else {
-            downloadWaiters.removeFirst().resume()
+            permitLock.unlock()
+            return
         }
+        let waiter = downloadWaiters.removeFirst()
+        permitLock.unlock()
+        waiter.resume()
     }
 }
