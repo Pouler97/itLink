@@ -10,11 +10,3 @@ enum ImageGridItemKind: Hashable, Sendable {
     case imageURL(URL)
     case nonLink(text: String)
 }
-
-enum ThumbnailLoadState: Equatable {
-    case idle
-    case loading
-    case loaded
-    case failed
-    case placeholder
-}

@@ -11,8 +11,16 @@ actor HTTPClient {
 
     private let session: URLSession
 
-    init(session: URLSession = .shared) {
+    init(session: URLSession = HTTPClient.makeDefaultSession()) {
         self.session = session
+    }
+
+    nonisolated static func makeDefaultSession() -> URLSession {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 15
+        configuration.timeoutIntervalForResource = 20
+        configuration.waitsForConnectivity = false
+        return URLSession(configuration: configuration)
     }
 
     func data(
@@ -63,7 +71,7 @@ actor HTTPClient {
 
         if let urlError = error as? URLError {
             switch urlError.code {
-            case .cancelled:
+            case .cancelled, .timedOut:
                 return false
             default:
                 return true

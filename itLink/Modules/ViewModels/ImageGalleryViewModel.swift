@@ -11,7 +11,9 @@ enum GalleryImageState: Equatable {
 @MainActor
 @Observable
 final class ImageGalleryViewModel {
-    let items: [ImageGridItem]
+    private let sourceItems: [ImageGridItem]
+    private(set) var pageItems: [ImageGridItem]
+    private(set) var thumbnails: [String: UIImage] = [:]
     private(set) var currentIndex: Int
     private(set) var states: [String: GalleryImageState] = [:]
     private(set) var images: [String: UIImage] = [:]
@@ -21,14 +23,24 @@ final class ImageGalleryViewModel {
     private let imageLoader: any ImageLoadingProviding
     private var loadTasks: [String: Task<Void, Never>] = [:]
     private var pagingLoadTask: Task<Void, Never>?
+    private var pageResolveTask: Task<Void, Never>?
 
     init(items: [ImageGridItem], startIndex: Int, imageLoader: any ImageLoadingProviding = ImageLoadingService.shared) {
-        self.items = items
-        self.currentIndex = min(max(startIndex, 0), max(items.count - 1, 0))
+        self.sourceItems = items
         self.imageLoader = imageLoader
+        let clampedStart = min(max(startIndex, 0), max(items.count - 1, 0))
+        if items.indices.contains(clampedStart) {
+            self.pageItems = [items[clampedStart]]
+            self.currentIndex = 0
+        } else {
+            self.pageItems = []
+            self.currentIndex = 0
+        }
     }
 
     func cancelAllLoading() {
+        pageResolveTask?.cancel()
+        pageResolveTask = nil
         pagingLoadTask?.cancel()
         pagingLoadTask = nil
         loadTasks.values.forEach { $0.cancel() }
@@ -37,8 +49,8 @@ final class ImageGalleryViewModel {
     }
 
     var currentItem: ImageGridItem? {
-        guard items.indices.contains(currentIndex) else { return nil }
-        return items[currentIndex]
+        guard pageItems.indices.contains(currentIndex) else { return nil }
+        return pageItems[currentIndex]
     }
 
     var currentURL: URL? {
@@ -56,7 +68,7 @@ final class ImageGalleryViewModel {
 
     func selectIndex(_ index: Int) {
         let previousIndex = currentIndex
-        let clampedIndex = min(max(index, 0), max(items.count - 1, 0))
+        let clampedIndex = min(max(index, 0), max(pageItems.count - 1, 0))
         currentIndex = clampedIndex
         guard clampedIndex != previousIndex else { return }
 
@@ -75,8 +87,54 @@ final class ImageGalleryViewModel {
     }
 
     func onAppear() {
+        resolveValidPages()
         loadImage(at: currentIndex)
         preloadNeighbors(around: currentIndex)
+    }
+
+    func index(of itemID: String) -> Int? {
+        pageItems.firstIndex(where: { $0.id == itemID })
+    }
+
+    private func resolveValidPages() {
+        pageResolveTask?.cancel()
+        pageResolveTask = Task {
+            defer {
+                if !Task.isCancelled {
+                    pageResolveTask = nil
+                }
+            }
+
+            var validItems: [ImageGridItem] = []
+            var loadedThumbnails: [String: UIImage] = [:]
+            let currentID = currentItem?.id
+
+            for item in sourceItems {
+                if Task.isCancelled { return }
+                guard case let .imageURL(url) = item.kind else { continue }
+                if let thumbnail = await imageLoader.cachedThumbnail(for: url) {
+                    loadedThumbnails[item.id] = thumbnail
+                    validItems.append(item)
+                    continue
+                }
+                if item.id == currentID {
+                    validItems.append(item)
+                }
+            }
+
+            if Task.isCancelled { return }
+
+            thumbnails = loadedThumbnails
+            pageItems = validItems
+            if let currentID, let index = validItems.firstIndex(where: { $0.id == currentID }) {
+                currentIndex = index
+            } else {
+                currentIndex = min(currentIndex, max(validItems.count - 1, 0))
+            }
+
+            loadImage(at: currentIndex)
+            preloadNeighbors(around: currentIndex)
+        }
     }
 
     func retry(item: ImageGridItem) {
@@ -94,8 +152,8 @@ final class ImageGalleryViewModel {
     }
 
     private func loadImage(at index: Int) {
-        guard items.indices.contains(index) else { return }
-        loadImage(for: items[index], force: false)
+        guard pageItems.indices.contains(index) else { return }
+        loadImage(for: pageItems[index], force: false)
     }
 
     private func loadImage(for item: ImageGridItem, force: Bool) {

@@ -19,6 +19,10 @@ final class HTTPClientRetryTests: XCTestCase {
         XCTAssertFalse(HTTPClient.isRetryable(CancellationError()))
     }
 
+    func testIsRetryableReturnsFalseForTimeout() {
+        XCTAssertFalse(HTTPClient.isRetryable(URLError(.timedOut)))
+    }
+
     func testDoesNotRetryClientErrors() async {
         var requestCount = 0
         MockURLProtocol.requestHandler = { _ in

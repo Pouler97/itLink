@@ -17,9 +17,15 @@ private final class BoundsAwareScrollView: UIScrollView {
 struct ZoomableImageView: UIViewRepresentable {
     let image: UIImage
     var onTap: () -> Void
+    var onDismissChanged: (CGSize) -> Void = { _ in }
+    var onDismissEnded: (Bool) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onTap: onTap)
+        Coordinator(
+            onTap: onTap,
+            onDismissChanged: onDismissChanged,
+            onDismissEnded: onDismissEnded
+        )
     }
 
     func makeUIView(context: Context) -> UIScrollView {
@@ -54,6 +60,15 @@ struct ZoomableImageView: UIViewRepresentable {
         singleTap.require(toFail: doubleTap)
         scrollView.addGestureRecognizer(singleTap)
 
+        let dismissPan = UIPanGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleDismissPan(_:))
+        )
+        dismissPan.delegate = context.coordinator
+        dismissPan.cancelsTouchesInView = false
+        scrollView.addGestureRecognizer(dismissPan)
+        context.coordinator.dismissPan = dismissPan
+
         let coordinator = context.coordinator
         coordinator.scrollView = scrollView
         scrollView.onBoundsReady = { [weak coordinator] in
@@ -71,6 +86,8 @@ struct ZoomableImageView: UIViewRepresentable {
         }
 
         context.coordinator.onTap = onTap
+        context.coordinator.onDismissChanged = onDismissChanged
+        context.coordinator.onDismissEnded = onDismissEnded
 
         guard imageView.image !== image else { return }
 
@@ -78,16 +95,61 @@ struct ZoomableImageView: UIViewRepresentable {
         context.coordinator.layoutImage(in: scrollView, imageView: imageView)
     }
 
-    final class Coordinator: NSObject, UIScrollViewDelegate {
+    final class Coordinator: NSObject, UIScrollViewDelegate, UIGestureRecognizerDelegate {
         static let imageViewTag = 1001
 
         var onTap: () -> Void
+        var onDismissChanged: (CGSize) -> Void
+        var onDismissEnded: (Bool) -> Void
         weak var scrollView: UIScrollView?
+        weak var dismissPan: UIPanGestureRecognizer?
         private var isLayouting = false
         private var lastLayoutSignature: String?
 
-        init(onTap: @escaping () -> Void) {
+        init(
+            onTap: @escaping () -> Void,
+            onDismissChanged: @escaping (CGSize) -> Void,
+            onDismissEnded: @escaping (Bool) -> Void
+        ) {
             self.onTap = onTap
+            self.onDismissChanged = onDismissChanged
+            self.onDismissEnded = onDismissEnded
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard gestureRecognizer === dismissPan,
+                  let scrollView,
+                  let pan = gestureRecognizer as? UIPanGestureRecognizer else {
+                return true
+            }
+            guard scrollView.zoomScale <= scrollView.minimumZoomScale + 0.01 else {
+                return false
+            }
+            let velocity = pan.velocity(in: scrollView)
+            return velocity.y > 0 && abs(velocity.y) > abs(velocity.x)
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            false
+        }
+
+        @objc func handleDismissPan(_ pan: UIPanGestureRecognizer) {
+            guard let scrollView else { return }
+            let translation = pan.translation(in: scrollView)
+
+            switch pan.state {
+            case .changed:
+                onDismissChanged(CGSize(width: translation.x, height: max(0, translation.y)))
+            case .ended, .cancelled, .failed:
+                let velocity = pan.velocity(in: scrollView)
+                let shouldDismiss = translation.y > 110 || (velocity.y > 720 && translation.y > 20)
+                onDismissEnded(shouldDismiss)
+            default:
+                break
+            }
         }
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? {
@@ -105,15 +167,16 @@ struct ZoomableImageView: UIViewRepresentable {
         }
 
         @objc func handleDoubleTap(_ recognizer: UITapGestureRecognizer) {
-            guard let scrollView else { return }
+            guard let scrollView,
+                  let imageView = scrollView.viewWithTag(Self.imageViewTag) as? UIImageView else { return }
 
             if scrollView.zoomScale > scrollView.minimumZoomScale {
                 scrollView.setZoomScale(scrollView.minimumZoomScale, animated: true)
                 return
             }
 
-            let point = recognizer.location(in: scrollView)
-            let zoomRect = zoomRect(for: scrollView, scale: 2.5, center: point)
+            let pointInImage = recognizer.location(in: imageView)
+            let zoomRect = zoomRect(for: scrollView, scale: 2.5, center: pointInImage)
             scrollView.zoom(to: zoomRect, animated: true)
         }
 

@@ -1,7 +1,3 @@
-//
-//  Copyright © 2025 Inschooltech. All rights reserved.
-//
-
 import SwiftUI
 
 @main

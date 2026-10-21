@@ -27,8 +27,22 @@ actor ImageLoadingService {
         self.maxConcurrentDownloads = max(1, maxConcurrentDownloads)
     }
 
-    func thumbnail(for url: URL) async throws -> UIImage {
+    func cachedThumbnail(for url: URL) async -> UIImage? {
         if let cached = await cacheStore.thumbnailImage(for: url) {
+            return cached
+        }
+
+        guard let data = await cacheStore.originalData(for: url),
+              let thumbnail = ImageIODecoder.thumbnail(from: data) else {
+            return nil
+        }
+
+        try? await cacheStore.storeThumbnail(thumbnail, for: url)
+        return thumbnail
+    }
+
+    func thumbnail(for url: URL) async throws -> UIImage {
+        if let cached = await cachedThumbnail(for: url) {
             return cached
         }
 

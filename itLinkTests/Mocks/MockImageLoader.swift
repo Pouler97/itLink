@@ -32,13 +32,21 @@ final class MockImageLoader: ImageLoadingProviding, @unchecked Sendable {
     var thumbnailDelayNanoseconds: UInt64 = 0
     var originalDelayNanoseconds: UInt64 = 0
     var thumbnailResult: Result<UIImage, Error> = .success(TestImageFactory.solidColor())
+    var thumbnailResults: [URL: Result<UIImage, Error>] = [:]
     var originalResult: Result<UIImage, Error> = .success(TestImageFactory.solidColor())
 
     func thumbnail(for url: URL) async throws -> UIImage {
         if thumbnailDelayNanoseconds > 0 {
             try await Task.sleep(nanoseconds: thumbnailDelayNanoseconds)
         }
+        if let thumbnailResults = thumbnailResults[url] {
+            return try thumbnailResults.get()
+        }
         return try thumbnailResult.get()
+    }
+
+    func cachedThumbnail(for url: URL) async -> UIImage? {
+        try? await thumbnail(for: url)
     }
 
     func originalImage(for url: URL) async throws -> UIImage {

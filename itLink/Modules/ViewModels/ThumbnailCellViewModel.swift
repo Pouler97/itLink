@@ -2,6 +2,14 @@ import Foundation
 import Observation
 import UIKit
 
+enum ThumbnailLoadState: Equatable {
+    case idle
+    case loading
+    case loaded
+    case failed
+    case placeholder
+}
+
 @MainActor
 @Observable
 final class ThumbnailCellViewModel {
@@ -11,11 +19,17 @@ final class ThumbnailCellViewModel {
     private(set) var image: UIImage?
 
     private let imageLoader: any ImageLoadingProviding
+    private let loadTimeoutNanoseconds: UInt64?
     private var loadTask: Task<Void, Never>?
 
-    init(item: ImageGridItem, imageLoader: any ImageLoadingProviding = ImageLoadingService.shared) {
+    init(
+        item: ImageGridItem,
+        imageLoader: any ImageLoadingProviding = ImageLoadingService.shared,
+        loadTimeoutNanoseconds: UInt64? = nil
+    ) {
         self.item = item
         self.imageLoader = imageLoader
+        self.loadTimeoutNanoseconds = loadTimeoutNanoseconds
 
         switch item.kind {
         case .nonLink:
@@ -35,7 +49,7 @@ final class ThumbnailCellViewModel {
 
     func loadIfNeeded() {
         guard case .imageURL = item.kind else { return }
-        guard state == .idle || state == .failed else { return }
+        guard state == .idle else { return }
         startLoading()
     }
 
@@ -53,7 +67,7 @@ final class ThumbnailCellViewModel {
 
         loadTask = Task {
             do {
-                let thumbnail = try await imageLoader.thumbnail(for: url)
+                let thumbnail = try await thumbnailWithTimeout(from: url)
                 guard !Task.isCancelled else {
                     state = .idle
                     return
@@ -67,6 +81,28 @@ final class ThumbnailCellViewModel {
                 }
                 state = .failed
             }
+        }
+    }
+
+    private func thumbnailWithTimeout(from url: URL) async throws -> UIImage {
+        guard let loadTimeoutNanoseconds else {
+            return try await imageLoader.thumbnail(for: url)
+        }
+
+        return try await withThrowingTaskGroup(of: UIImage.self) { group in
+            group.addTask {
+                try await self.imageLoader.thumbnail(for: url)
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: loadTimeoutNanoseconds)
+                throw URLError(.timedOut)
+            }
+
+            guard let result = try await group.next() else {
+                throw URLError(.timedOut)
+            }
+            group.cancelAll()
+            return result
         }
     }
 }

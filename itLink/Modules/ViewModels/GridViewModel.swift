@@ -4,13 +4,16 @@ import Observation
 enum GridLoadingState: Equatable {
     case loading
     case loaded
-    case failed(message: String)
+    case failed
 }
 
 @MainActor
 @Observable
 final class GridViewModel {
+    static let pageSize = 12
+
     private(set) var items: [ImageGridItem] = []
+    private(set) var visibleCount = 0
     private(set) var loadingState: GridLoadingState = .loading
 
     private let listService: ImageListService
@@ -47,11 +50,21 @@ final class GridViewModel {
         }
     }
 
+    var displayedItems: [ImageGridItem] {
+        Array(items.prefix(visibleCount))
+    }
+
     var imageItems: [ImageGridItem] {
         items.filter {
             if case .imageURL = $0.kind { return true }
             return false
         }
+    }
+
+    func revealMoreIfNeeded(for item: ImageGridItem) {
+        guard let lastVisible = displayedItems.last, lastVisible.id == item.id else { return }
+        guard visibleCount < items.count else { return }
+        visibleCount = min(items.count, visibleCount + Self.pageSize)
     }
 
     func galleryStartIndex(for item: ImageGridItem) -> Int? {
@@ -60,7 +73,7 @@ final class GridViewModel {
 
     private func loadInitial() async {
         if let cached = await listService.cachedItemsIfAvailable(), !cached.isEmpty {
-            items = cached
+            replaceItems(cached)
             loadingState = .loaded
         }
 
@@ -74,14 +87,27 @@ final class GridViewModel {
 
         do {
             let fetched = try await listService.fetchRemoteItems()
-            items = fetched
+            replaceItems(fetched)
             loadingState = .loaded
             needsRemoteRefresh = false
         } catch {
             if items.isEmpty {
-                loadingState = .failed(message: error.localizedDescription)
+                loadingState = .failed
             }
             needsRemoteRefresh = true
+        }
+    }
+
+    func applyItemsForTesting(_ newItems: [ImageGridItem]) {
+        replaceItems(newItems)
+    }
+
+    private func replaceItems(_ newItems: [ImageGridItem]) {
+        items = newItems
+        if visibleCount == 0 {
+            visibleCount = min(Self.pageSize, newItems.count)
+        } else {
+            visibleCount = min(max(visibleCount, Self.pageSize), newItems.count)
         }
     }
 }

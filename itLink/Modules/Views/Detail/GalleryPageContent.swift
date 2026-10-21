@@ -7,6 +7,8 @@ struct GalleryPageContent: View, Equatable {
     let image: UIImage?
     let onToggleChrome: () -> Void
     let onRetry: () -> Void
+    var onDismissChanged: (CGSize) -> Void = { _ in }
+    var onDismissEnded: (Bool) -> Void = { _ in }
 
     static func == (lhs: GalleryPageContent, rhs: GalleryPageContent) -> Bool {
         lhs.item.id == rhs.item.id
@@ -21,6 +23,7 @@ struct GalleryPageContent: View, Equatable {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
                 .onTapGesture(perform: onToggleChrome)
+                .simultaneousGesture(dismissDrag)
 
         case .failed:
             VStack(spacing: 16) {
@@ -33,14 +36,34 @@ struct GalleryPageContent: View, Equatable {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
             .onTapGesture(perform: onToggleChrome)
+            .simultaneousGesture(dismissDrag)
 
         case .loaded:
             if let image {
-                ZoomableImageView(image: image, onTap: onToggleChrome)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ZoomableImageView(
+                    image: image,
+                    onTap: onToggleChrome,
+                    onDismissChanged: onDismissChanged,
+                    onDismissEnded: onDismissEnded
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ArcSpinnerView(size: 32, lineWidth: 2.5, color: .white)
             }
         }
+    }
+
+    private var dismissDrag: some Gesture {
+        DragGesture(minimumDistance: 20)
+            .onChanged { value in
+                let translation = value.translation
+                guard translation.height > 0, translation.height >= abs(translation.width) else { return }
+                onDismissChanged(translation)
+            }
+            .onEnded { value in
+                let translation = value.translation.height
+                let predicted = value.predictedEndTranslation.height
+                onDismissEnded(translation > 120 || predicted > 240)
+            }
     }
 }

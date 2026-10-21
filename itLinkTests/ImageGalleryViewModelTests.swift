@@ -28,11 +28,39 @@ final class ImageGalleryViewModelTests: XCTestCase {
         let viewModel = ImageGalleryViewModel(items: items, startIndex: 1, imageLoader: loader)
 
         viewModel.onAppear()
+        await waitUntil(viewModel.pageItems.count == 3)
         await waitUntil(viewModel.state(for: items[1]) == .loaded)
+        await waitUntil(viewModel.state(for: items[0]) == .loaded)
+        await waitUntil(viewModel.state(for: items[2]) == .loaded)
 
         XCTAssertEqual(viewModel.state(for: items[1]), .loaded)
         XCTAssertEqual(viewModel.state(for: items[0]), .loaded)
         XCTAssertEqual(viewModel.state(for: items[2]), .loaded)
+    }
+
+    func testPagingSkipsItemsWhoseThumbnailFailed() async {
+        let loader = MockImageLoader()
+        let validA = makeImageItem(id: "1")
+        let invalid = makeImageItem(id: "2")
+        let validB = makeImageItem(id: "3")
+
+        loader.thumbnailResults = [
+            URL(string: "https://example.com/1.jpg")!: .success(TestImageFactory.solidColor()),
+            URL(string: "https://example.com/2.jpg")!: .failure(ImageLoadingError.invalidImageData),
+            URL(string: "https://example.com/3.jpg")!: .success(TestImageFactory.solidColor())
+        ]
+
+        let viewModel = ImageGalleryViewModel(
+            items: [validA, invalid, validB],
+            startIndex: 0,
+            imageLoader: loader
+        )
+
+        viewModel.onAppear()
+        await waitUntil(viewModel.pageItems.count == 2)
+
+        XCTAssertEqual(viewModel.pageItems.map(\.id), ["1", "3"])
+        XCTAssertFalse(viewModel.pageItems.contains(where: { $0.id == "2" }))
     }
 
     func testRetryAfterFailureReloadsImage() async {
@@ -68,6 +96,9 @@ final class ImageGalleryViewModelTests: XCTestCase {
         while !condition(), Date() < deadline {
             await Task.yield()
             try? await Task.sleep(for: .milliseconds(10))
+        }
+        if !condition() {
+            XCTFail("Timed out waiting for condition")
         }
     }
 }

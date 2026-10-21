@@ -1,22 +1,34 @@
 import SwiftUI
 
-private struct GalleryRoute: Hashable {
-    let startIndex: Int
-}
-
 struct GridView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var viewModel = GridViewModel()
-    @State private var galleryRoute: GalleryRoute?
+    @State private var galleryStartIndex: Int?
+    @State private var cellFrames: [String: CGRect] = [:]
+    @State private var sourceFrame: CGRect = .zero
+    @State private var heroPreview: UIImage?
+    @State private var heroHiddenID: String?
 
-    private let gridColumns = [
-        GridItem(
-            .adaptive(
-                minimum: GridLayoutCalculator.minCellWidth,
-                maximum: GridLayoutCalculator.maxCellWidth
-            ),
-            spacing: GridLayoutCalculator.spacing
-        )
-    ]
+    private var sizeProfile: GridSizeProfile {
+        horizontalSizeClass == .regular ? .regular : .compact
+    }
+
+    private var layoutMetrics: GridLayoutCalculator.Metrics {
+        GridLayoutCalculator.metrics(for: sizeProfile)
+    }
+
+    private var gridColumns: [GridItem] {
+        let metrics = layoutMetrics
+        return [
+            GridItem(
+                .adaptive(
+                    minimum: metrics.minCellWidth,
+                    maximum: metrics.maxCellWidth
+                ),
+                spacing: metrics.spacing
+            )
+        ]
+    }
 
     var body: some View {
         NavigationStack {
@@ -24,12 +36,20 @@ struct GridView: View {
                 .navigationTitle("Изображения")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbarBackground(.visible, for: .navigationBar)
-                .navigationDestination(item: $galleryRoute) { route in
-                    ImageGalleryView(
-                        items: viewModel.imageItems,
-                        startIndex: route.startIndex
-                    )
-                }
+                .onPreferenceChange(GalleryCellFrameKey.self) { cellFrames = $0 }
+        }
+        .overlay {
+            if let startIndex = galleryStartIndex {
+                ImageGalleryView(
+                    items: viewModel.imageItems,
+                    startIndex: startIndex,
+                    cellFrames: cellFrames,
+                    sourceFrame: sourceFrame,
+                    previewImage: heroPreview,
+                    onHeroItemChange: { heroHiddenID = $0 },
+                    onClose: closeGallery
+                )
+            }
         }
         .onAppear {
             viewModel.start()
@@ -61,21 +81,45 @@ struct GridView: View {
 
         default:
             ScrollView {
-                LazyVGrid(columns: gridColumns, spacing: GridLayoutCalculator.spacing) {
-                    ForEach(viewModel.items) { item in
-                        ThumbnailCellView(item: item) {
-                            openGallery(for: item)
+                LazyVGrid(columns: gridColumns, spacing: layoutMetrics.spacing) {
+                    ForEach(viewModel.displayedItems) { item in
+                        ThumbnailCellView(
+                            item: item,
+                            isHiddenForHero: heroHiddenID == item.id
+                        ) { preview, frame in
+                            openGallery(for: item, preview: preview, frame: frame)
+                        }
+                        .onAppear {
+                            viewModel.revealMoreIfNeeded(for: item)
                         }
                     }
                 }
-                .padding(GridLayoutCalculator.padding)
+                .padding(layoutMetrics.padding)
             }
         }
     }
 
-    private func openGallery(for item: ImageGridItem) {
+    private func openGallery(for item: ImageGridItem, preview: UIImage?, frame: CGRect) {
         guard let index = viewModel.galleryStartIndex(for: item) else { return }
-        galleryRoute = GalleryRoute(startIndex: index)
+        heroPreview = preview
+        sourceFrame = frame.width > 1 ? frame : (cellFrames[item.id] ?? .zero)
+        heroHiddenID = item.id
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            galleryStartIndex = index
+        }
+    }
+
+    private func closeGallery() {
+        heroHiddenID = nil
+        heroPreview = nil
+        sourceFrame = .zero
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            galleryStartIndex = nil
+        }
     }
 }
 

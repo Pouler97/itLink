@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct PlaceholderView: View {
-    enum Style {
+    enum Style: Equatable {
         case nonLink
         case nonImage
         case loading
@@ -16,45 +16,43 @@ struct PlaceholderView: View {
             RoundedRectangle(cornerRadius: 8)
                 .fill(Color(.secondarySystemBackground))
 
-            switch style {
-            case .nonLink:
-                VStack(spacing: 6) {
-                    Image(systemName: "textformat")
-                        .font(.title2)
-                    Text("Не ссылка")
-                        .font(.caption2)
-                        .multilineTextAlignment(.center)
+            ZStack {
+                switch style {
+                case .nonLink:
+                    caption(icon: "textformat", title: "Не ссылка")
+                case .nonImage:
+                    caption(icon: "link", title: "Не изображение")
+                case .loading:
+                    ArcSpinnerView(size: 22, lineWidth: 2)
+                        .transition(contentTransition)
+                case .failed:
+                    caption(icon: "arrow.clockwise", title: "Повторить")
+                        .transition(contentTransition)
                 }
-                .foregroundStyle(.secondary)
-                .padding(4)
-
-            case .nonImage:
-                VStack(spacing: 6) {
-                    Image(systemName: "link")
-                        .font(.title2)
-                    Text("Не изображение")
-                        .font(.caption2)
-                        .multilineTextAlignment(.center)
-                }
-                .foregroundStyle(.secondary)
-                .padding(4)
-
-            case .loading:
-                ArcSpinnerView(size: 22, lineWidth: 2)
-
-            case .failed:
-                VStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.title3)
-                    if let onRetry {
-                        Button("Повторить", action: onRetry)
-                            .font(.caption)
-                            .buttonStyle(.bordered)
-                    }
-                }
-                .foregroundStyle(.secondary)
-                .padding(4)
             }
         }
+        .animation(.easeInOut(duration: 0.32), value: style)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if style == .failed {
+                onRetry?()
+            }
+        }
+    }
+
+    private var contentTransition: AnyTransition {
+        .opacity.combined(with: .scale(scale: 0.86))
+    }
+
+    private func caption(icon: String, title: String) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.title2)
+            Text(title)
+                .font(.caption2)
+                .multilineTextAlignment(.center)
+        }
+        .foregroundStyle(.secondary)
+        .padding(4)
     }
 }

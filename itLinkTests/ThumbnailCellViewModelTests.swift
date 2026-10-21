@@ -48,6 +48,25 @@ final class ThumbnailCellViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.image)
     }
 
+    func testSlowLoadTurnsIntoRetryableFailure() async {
+        let loader = MockImageLoader()
+        loader.thumbnailDelayNanoseconds = 1_000_000_000
+        loader.thumbnailResult = .success(TestImageFactory.solidColor())
+
+        let item = makeImageItem()
+        let viewModel = ThumbnailCellViewModel(
+            item: item,
+            imageLoader: loader,
+            loadTimeoutNanoseconds: 50_000_000
+        )
+
+        viewModel.loadIfNeeded()
+        await waitUntil(viewModel.state == .failed)
+
+        XCTAssertEqual(viewModel.state, .failed)
+        XCTAssertNil(viewModel.image)
+    }
+
     private func makeImageItem() -> ImageGridItem {
         ImageGridItem(
             id: "0-0-test",
@@ -64,6 +83,9 @@ final class ThumbnailCellViewModelTests: XCTestCase {
         while !condition(), Date() < deadline {
             await Task.yield()
             try? await Task.sleep(for: .milliseconds(10))
+        }
+        if !condition() {
+            XCTFail("Timed out waiting for condition")
         }
     }
 }

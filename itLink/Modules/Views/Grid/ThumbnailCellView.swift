@@ -2,47 +2,77 @@ import SwiftUI
 
 struct ThumbnailCellView: View {
     @State private var viewModel: ThumbnailCellViewModel
-    let onOpen: () -> Void
+    @State private var cellFrame: CGRect = .zero
+    let isHiddenForHero: Bool
+    let onOpen: (UIImage?, CGRect) -> Void
 
-    init(item: ImageGridItem, onOpen: @escaping () -> Void) {
+    init(
+        item: ImageGridItem,
+        isHiddenForHero: Bool = false,
+        onOpen: @escaping (UIImage?, CGRect) -> Void
+    ) {
         _viewModel = State(initialValue: ThumbnailCellViewModel(item: item))
+        self.isHiddenForHero = isHiddenForHero
         self.onOpen = onOpen
     }
 
     var body: some View {
-        Group {
-            switch viewModel.state {
-            case .placeholder:
-                PlaceholderView(style: .nonLink)
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                cellContent
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+            .background(cellFrameReporter)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityLabel)
+            .accessibilityAddTraits((viewModel.state == .loaded || viewModel.state == .failed) ? .isButton : [])
+    }
 
-            case .idle, .loading:
-                PlaceholderView(style: .loading)
-                    .task { viewModel.loadIfNeeded() }
-                    .onDisappear { viewModel.cancelLoading() }
-
-            case .loaded:
-                if let image = viewModel.image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .clipped()
-                        .contentShape(Rectangle())
-                        .onTapGesture(perform: onOpen)
-                } else {
-                    PlaceholderView(style: .nonImage)
+    private var cellFrameReporter: some View {
+        GeometryReader { geometry in
+            Color.clear
+                .preference(
+                    key: GalleryCellFrameKey.self,
+                    value: [viewModel.item.id: geometry.frame(in: .global)]
+                )
+                .onAppear {
+                    cellFrame = geometry.frame(in: .global)
                 }
-
-            case .failed:
-                PlaceholderView(style: .failed) {
-                    viewModel.retry()
+                .onChange(of: geometry.frame(in: .global)) { _, frame in
+                    cellFrame = frame
                 }
+        }
+    }
+
+    @ViewBuilder
+    private var cellContent: some View {
+        switch viewModel.state {
+        case .placeholder:
+            PlaceholderView(style: .nonLink)
+
+        case .idle, .loading, .failed:
+            PlaceholderView(
+                style: viewModel.state == .failed ? .failed : .loading,
+                onRetry: { viewModel.retry() }
+            )
+            .task { viewModel.loadIfNeeded() }
+            .onDisappear { viewModel.cancelLoading() }
+
+        case .loaded:
+            if let image = viewModel.image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                    .clipped()
+                    .opacity(isHiddenForHero ? 0 : 1)
+                    .onTapGesture { onOpen(image, cellFrame) }
+            } else {
+                PlaceholderView(style: .nonImage)
             }
         }
-        .aspectRatio(1, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityAddTraits(viewModel.state == .loaded ? .isButton : [])
     }
 
     private var accessibilityLabel: String {

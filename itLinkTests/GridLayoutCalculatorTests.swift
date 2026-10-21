@@ -35,4 +35,14 @@ final class GridLayoutCalculatorTests: XCTestCase {
         XCTAssertEqual(layout.columnCount, 3)
         XCTAssertEqual(layout.cellSize, 119.333, accuracy: 0.01)
     }
+
+    func testRegularProfileUsesLargerCellsAndFewerColumns() {
+        let phone = GridLayoutCalculator.layout(for: 1024, profile: .compact)
+        let pad = GridLayoutCalculator.layout(for: 1024, profile: .regular)
+
+        XCTAssertGreaterThan(pad.cellSize, phone.cellSize)
+        XCTAssertLessThan(pad.columnCount, phone.columnCount)
+        XCTAssertGreaterThanOrEqual(pad.cellSize, GridLayoutCalculator.Metrics.regular.minCellWidth)
+        XCTAssertLessThanOrEqual(pad.cellSize, GridLayoutCalculator.Metrics.regular.maxCellWidth)
+    }
 }
